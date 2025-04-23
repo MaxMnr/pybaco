@@ -29,22 +29,8 @@ class ProcessingPipeline:
     """
     A pipeline for processing video frames with averaging and stabilization using workers and queues.
     """
-    def __init__(
-            self, 
-            handler: VideoHandler,
-            output_dir: Optional[Path] = None,
-            first_frame_index: int = 0,
-            total_frames: Optional[int] = 60,
-            num_frames_to_average: int = 21,
-            num_avg_workers: int = 15,
-            num_transform_workers: int = 15,
-            num_stabilize_workers: int = 20,
-            do_averaging: bool = True,
-            do_stabilization: bool = True,
-            remove_temp_files: bool = False,
-            ):
+    def __init__(self, handler: VideoHandler, first_frame_index: int = 0, total_frames: Optional[int] = 60, num_frames_to_average: int = 21, num_workers: int = 10, do_averaging: bool = True, do_stabilization: bool = True):
         self.handler = handler
-        self.output_dir = Path(output_dir) if output_dir else handler.output_dir
         
         # Video parameters
         self.first_frame_index = int(first_frame_index)
@@ -52,21 +38,18 @@ class ProcessingPipeline:
         
         # Processing options
         self.num_frames_to_average = int(num_frames_to_average) if do_averaging else 1 
-        self.num_avg_workers = int(num_avg_workers)
-        self.num_transform_workers = int(num_transform_workers)
-        self.num_stabilize_workers = int(num_stabilize_workers)
+        self.num_workers = int(num_workers)
         self.do_averaging = bool(do_averaging)
         self.do_stabilization = bool(do_stabilization)
-        self.remove_temp_files = bool(remove_temp_files)
+
         
         # Paths setup
-        self.contours_path = self.handler.contour_dir
-        self.averaging_path = self.output_dir / f"Averaged_{self.num_frames_to_average}"
-        self.transformations_path = self.output_dir / f"Transformation_Matrices_{self.num_frames_to_average}"
-        self.stabilizing_path = self.output_dir / f"Stabilized_{self.num_frames_to_average}"
+        self.averaging_path = self.handler.path_to_save / f"Averaged_{self.num_frames_to_average}"
+        self.transformations_path = self.handler.path_to_save / f"Transformation_Matrices_{self.num_frames_to_average}"
+        self.stabilizing_path = self.handler.path_to_save / f"Stabilized_{self.num_frames_to_average}"
         
         # Create directories
-        for path in [self.output_dir, self.averaging_path, 
+        for path in [self.handler.path_to_save, self.averaging_path, 
                      self.transformations_path, self.stabilizing_path]:
             path.mkdir(parents=True, exist_ok=True)
         
@@ -98,27 +81,30 @@ class ProcessingPipeline:
         print_success("Phase 2 was succesfull!\n")
 
         # STEP 3: Convert frames to video for averaged and stabilized frames
-        images_to_video(
-            self.averaging_path, 
-            f"{self.handler.output_dir}/Averaged_{self.num_frames_to_average}.MOV", 
-            fps=60, 
-            lossless=False
-        )
-        images_to_video(
-            self.stabilizing_path, 
-            f"{self.handler.output_dir}/Stabilized_{self.num_frames_to_average}.MOV", 
-            fps=60, 
-            lossless=False    
-        )
-        logger.info(f"Videos succesfully created!")
-        print_success("Video creations was succesfull!\n")
+        try: 
+            images_to_video(
+                self.averaging_path, 
+                f"{self.handler.path_to_save}/Averaged_{self.num_frames_to_average}.MOV", 
+                fps=60, 
+                lossless=False
+            )
+            images_to_video(
+                self.stabilizing_path, 
+                f"{self.handler.path_to_save}/Stabilized_{self.num_frames_to_average}.MOV", 
+                fps=60, 
+                lossless=False    
+            )
+            logger.info(f"Videos succesfully created!")
+            print_success("Video creations was succesfull!\n")
 
-        # STEP 4: Clean up frames folders if requested
-        if self.remove_temp_files and self.do_stabilization:
-            self._cleanup_frames_folders()
-            logger.info(f"Removed {self.averaging_path}")
-            logger.info(f"Removed {self.stabilizing_path}")
-            
+            if self.do_stabilization:
+                self._cleanup_frames_folders()
+                logger.info(f"Removed {self.averaging_path}")
+                logger.info(f"Removed {self.stabilizing_path}")
+        except:
+            logger.error(f"Error creating videos: {self.averaging_path} or {self.stabilizing_path}")
+            print_error(f"Error creating videos: {self.averaging_path} or {self.stabilizing_path}")
+            return False
         return True
     
     def run_phase_one(self):
@@ -135,12 +121,12 @@ class ProcessingPipeline:
             
             if self.do_stabilization:
                 # Check wether all contours from frame_indices exist
-                contours = sorted([f for f in os.listdir(self.contours_path) if f.endswith(".npy")])
+                contours = sorted([f for f in os.listdir(self.handler.path_to_contour) if f.endswith(".npy")])
 
                 for index in frame_indices:
                     expected_file = f"frame_{index:06d}.npy"
                     if expected_file not in contours:
-                        logger.error(f"File {expected_file} not found in the folder {self.contours_path}")
+                        logger.error(f"File {expected_file} not found in the folder {self.handler.path_to_contour}")
                         return False
                 
             # Set up progress tracking
@@ -154,9 +140,9 @@ class ProcessingPipeline:
             frame_queue = mp.Queue(maxsize=0)
 
             # Get reference frame for stabilization
-            cap = cv2.VideoCapture(str(self.handler.video_path))
+            cap = cv2.VideoCapture(str(self.handler.path_to_video))
             if not cap.isOpened():
-                logger.error(f"Error opening video file: {self.handler.video_path}")
+                logger.error(f"Error opening video file: {self.handler.path_to_video}")
                 return False
             
             cap.set(cv2.CAP_PROP_POS_FRAMES, self.first_frame_index)
@@ -167,23 +153,17 @@ class ProcessingPipeline:
                 return False
             ref_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             cap.release()
-            
-            # Store paths as strings
-            video_path_str = str(self.handler.video_path)
-            averaging_path_str = str(self.averaging_path)
-            transform_path_str = str(self.transformations_path)
-            contours_path_str = str(self.contours_path)
-            
+
             # Calculate chunks for frame averaging workers
-            chunk_size = max(1, len(frame_indices) // self.num_avg_workers)
+            chunk_size = max(1, len(frame_indices) // self.num_workers)
             
             # Start the progress tracker
             progress.start()
             
             # Start workers
             workers = self._start_phase_one_workers(
-                frame_indices, chunk_size, video_path_str, averaging_path_str,
-                transform_path_str, contours_path_str, frame_queue,
+                frame_indices, chunk_size, self.handler.path_to_video, self.averaging_path,
+                self.transformations_path, self.handler.path_to_contour, frame_queue,
                 progress, ref_img
             )
             
@@ -206,9 +186,9 @@ class ProcessingPipeline:
         workers = []
         
         # Start averaging workers
-        for i in range(self.num_avg_workers):
+        for i in range(self.num_workers):
             start_idx = i * chunk_size
-            end_idx = start_idx + chunk_size if i < self.num_avg_workers - 1 else len(frame_indices)
+            end_idx = start_idx + chunk_size if i < self.num_workers - 1 else len(frame_indices)
             chunk = frame_indices[start_idx:end_idx]
             
             worker = mp.Process(
@@ -228,7 +208,7 @@ class ProcessingPipeline:
         
         # Start transformation workers if needed
         if self.do_stabilization:
-            for _ in range(self.num_transform_workers):
+            for _ in range(self.num_workers):
                 worker = mp.Process(
                     target=self._transformation_worker,
                     args=(
@@ -272,7 +252,7 @@ class ProcessingPipeline:
             progress = ProgressTracker({"Applying stabilization": len(image_paths)})
             
             # Split work among workers
-            chunk_size = max(1, len(image_paths) // self.num_stabilize_workers)
+            chunk_size = max(1, len(image_paths) // (2 * self.num_workers))
             
             # Start the progress tracker
             progress.start()
@@ -298,9 +278,9 @@ class ProcessingPipeline:
         """Start the workers for phase two and return the list of worker processes."""
         workers = []
         
-        for i in range(self.num_stabilize_workers):
+        for i in range(self.num_workers):
             start_idx = i * chunk_size
-            end_idx = start_idx + chunk_size if i < self.num_stabilize_workers - 1 else len(image_paths)
+            end_idx = start_idx + chunk_size if i < self.num_workers - 1 else len(image_paths)
             
             # Only process up to the number of transforms we have
             end_idx = min(end_idx, len(self.smoothed_transforms))
