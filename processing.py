@@ -42,7 +42,6 @@ class ProcessingPipeline:
         self.do_averaging = bool(do_averaging)
         self.do_stabilization = bool(do_stabilization)
 
-        
         # Paths setup
         self.averaging_path = self.handler.path_to_save / f"Averaged_{self.num_frames_to_average}"
         self.transformations_path = self.handler.path_to_save / f"Transformation_Matrices_{self.num_frames_to_average}"

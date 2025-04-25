@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Union, Dict, Any
 import cv2
+import numpy as np
 from .printing import *
 
 class VideoHandler:
@@ -22,15 +23,25 @@ class VideoHandler:
             self._configure_paths()
 
     def _configure_paths(self):
-        """Configure file paths based on parameters."""
-        path_to_raw_videos = Path("/partages/Bartololab3/Shared/Fish/Data")
-        path_to_corrected_videos = Path("/partages/Bartololab3/Shared/Maxime/Corrected")
-        path_to_bad_contours = Path("/partages/Bartololab3/Shared/Maxime/Polygons_Contours")
+        import sys
+        # Detect if the user is on a Mac or Linux system to adapt the path
+        if sys.platform == "darwin":
+            # MacOS
+            main_path = Path("/Volumes/Shared Bartololab3/")
+        elif sys.platform.startswith("linux"):
+            # Linux
+            main_path = Path("/partages/Bartololab3/Shared/")
+        else:
+            raise EnvironmentError("Unsupported operating system. This code is designed for MacOS or Linux.")
 
+        """Configure file paths based on parameters."""
+        path_to_raw_videos = main_path / "Fish/Data"
+        path_to_corrected_videos = main_path / "Maxime/Corrected"
+        path_to_bad_contours = main_path / "Maxime/Polygons_Contours"
+    
         # Configure video path and output directory
         self.path_to_video = path_to_raw_videos / self.event_name / self.day / f"DJI_{self.number}.MOV"
-        version_str = self.version if self.version else "None"
-        self.path_to_save = path_to_corrected_videos / self.event_name / self.day / f"DJI_{self.number}_{version_str}"
+        self.path_to_save = path_to_corrected_videos / self.event_name / self.day / f"DJI_{self.number}_{self.version}"
 
         # Configure contour directory for stabilization (Using Gaspard's Code)
         contour_dir_name = f"{self.year[2:]}_{self.month}_{self.day}_{self.number}"
@@ -55,7 +66,18 @@ class VideoHandler:
         }
         cap.release()
         return info
+    
+    def save_data(self, filename):
+        data = {"year": self.year,
+                "month": self.month,
+                "day": self.day,
+                "number": self.number,
+                "version": self.version,
+                "N": self.N}
+        np.save(filename, data)
+        print_success(f"Data saved to {filename}")
 
+ 
 from typing import Union
 
 def check_params_format(year: Union[int, float], month: str, day: Union[int, float, str], number: Union[int, float, str], version: Union[int, float, str], N: int):

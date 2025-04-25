@@ -183,3 +183,11 @@ def video_to_images(path_to_video, path_to_save, num_frames_to_extract=30, name=
     print_success(f"Frames saved to {path_to_save}.")
     return True
 
+def get_os_root_dir():
+    import sys
+    if sys.platform == "darwin":
+        return Path("/Volumes/Shared Bartololab3")
+    elif sys.platform.startswith("linux"):
+        return Path("/partages/Bartololab3/Shared")
+    else:
+        raise EnvironmentError("Unsupported operating system. This code is designed for MacOS or Linux.")
