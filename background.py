@@ -4,50 +4,40 @@ import multiprocessing as mp
 import time
 import numpy as np
 import shutil  
-from rich.progress import Progress
+from rich.progress import Progress, track
 from joblib import Parallel, delayed
 from .printing import *
 from .utils import *
 
 
-
-def video_to_images(path_to_video, path_to_save, num_frames_to_extract=30, name="frame_"):
-    os.makedirs(path_to_save, exist_ok=True)
-
+def compute_background(path_to_video, path_to_save, num_images):
     cap = cv2.VideoCapture(path_to_video)
-    if not cap.isOpened():
-        print_error("Error: Could not open video.")
-        return False
 
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    index_list = np.linspace(0, total_frames - 1, num_images, dtype=int)
 
-    if num_frames_to_extract < 0:
-        num_frames_to_extract = frame_count
-    if num_frames_to_extract > frame_count:
-        num_frames_to_extract = frame_count
-        print_warning(f"num_frames_to_extract is greater than the number of frames in the video. Setting it to {frame_count}.")
-    if num_frames_to_extract == 0:
-        print_warning("num_frames_to_extract is 0. No frames will be extracted.")
-        return False
+    frames = []
 
-    step = max(1, frame_count // num_frames_to_extract)
-    indices = list(range(0, frame_count, step))[:num_frames_to_extract]
-
-    for i, idx in track(enumerate(indices), description="Extracting frames", total=len(indices)):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+    for i in track(index_list, description="Reading frames for background"):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
         ret, frame = cap.read()
         if not ret:
-            print_error(f"Error: Could not read frame at index {idx}.")
             continue
-        frame_filename = os.path.join(path_to_save, f"{name}{i:06d}.png")
-        cv2.imwrite(frame_filename, frame)
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
     cap.release()
-    print_success(f"Frames saved to {path_to_save}.")
-    return True
+
+    frames = np.array(frames)
+    background_max = np.max(frames, axis=0).astype(np.uint8)
+
+    background_path = os.path.join(path_to_save, "background.png")
+    cv2.imwrite(background_path, cv2.cvtColor(background_max, cv2.COLOR_RGB2BGR))
+
+    print_success(f"Background computed and saved to {background_path}")
+    return background_max
 
 
-def compute_background(path_to_video, path_to_save, num_images=20):
+def compute_background2(path_to_video, path_to_save, num_images=20):
     path_to_bg_frames = os.path.join(path_to_save, "frames_for_background")
 
     if os.path.exists(path_to_bg_frames):
@@ -66,7 +56,6 @@ def compute_background(path_to_video, path_to_save, num_images=20):
         frames.append(frame_rgb)
 
     frames_array = np.array(frames)
-    print_title(f"Frame stack shape: {frames_array.shape}")
 
     background_max = np.max(frames_array, axis=0).astype(np.uint8)
     background_path = os.path.join(path_to_save, "background.png")

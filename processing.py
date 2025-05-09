@@ -42,11 +42,23 @@ class ProcessingPipeline:
         self.do_averaging = bool(do_averaging)
         self.do_stabilization = bool(do_stabilization)
 
+
         # Paths setup
         self.averaging_path = self.handler.path_to_save / f"Averaged_{self.num_frames_to_average}"
         self.transformations_path = self.handler.path_to_save / f"Transformation_Matrices_{self.num_frames_to_average}"
         self.stabilizing_path = self.handler.path_to_save / f"Stabilized_{self.num_frames_to_average}"
         
+        # Remove folders if they already exist
+        # if self.averaging_path.exists():
+        #     shutil.rmtree(self.averaging_path)
+        # if self.transformations_path.exists():
+        #     shutil.rmtree(self.transformations_path)
+        # if self.stabilizing_path.exists():
+        #     shutil.rmtree(self.stabilizing_path)
+        
+        if self.handler.path_to_save.exists():
+            shutil.rmtree(self.handler.path_to_save)
+
         # Create directories
         for path in [self.handler.path_to_save, self.averaging_path, 
                      self.transformations_path, self.stabilizing_path]:
@@ -55,6 +67,9 @@ class ProcessingPipeline:
         # Transformation data
         self.frame_to_frame_transforms = None
         self.smoothed_transforms = None
+
+
+        
 
     def run(self):
         """Main method to run the entire pipeline."""
@@ -251,7 +266,7 @@ class ProcessingPipeline:
             progress = ProgressTracker({"Applying stabilization": len(image_paths)})
             
             # Split work among workers
-            chunk_size = max(1, len(image_paths) // (2 * self.num_workers))
+            chunk_size = max(1, len(image_paths) // (self.num_workers))
             
             # Start the progress tracker
             progress.start()

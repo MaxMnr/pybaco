@@ -3,12 +3,25 @@ from typing import Union, Dict, Any
 import cv2
 import numpy as np
 from .printing import *
+import os
+import pandas as pd
+import pysrt
+import re
+import datetime
+from typing import Union
 
 class VideoHandler:
     """Handles video paths (video IO and metadata) for drone recordings."""
 
     def __init__(self, year: Union[int, float], month: str, day: Union[int, float], number: Union[int, float], version: Union[int, float], N: int, config: bool = True):
-        
+        """
+        year: int or float - 20XX
+        month: str - ["February", "March", "November", "December"]
+        day: int or float - Day number of a given campaign
+        number: int or float - Number of the video (DJI_XXXX)
+        version: int or float - Sub Index for a video sequence
+        N: int or float - Number of frames used to average while removing the ripples
+        """
         # Convert all parameters to expected format and to strings 
         verified_params = check_params_format(year, month, day, number, version, N)
         self.year = verified_params["year"]
@@ -32,7 +45,7 @@ class VideoHandler:
             # Linux
             main_path = Path("/partages/Bartololab3/Shared/")
         else:
-            raise EnvironmentError("Unsupported operating system. This code is designed for MacOS or Linux.")
+            raise EnvironmentError("Unsupported operating system. This code is designed for MacOS or Linux. If you are using Windows it's still time to upgrade ;)")
 
         """Configure file paths based on parameters."""
         path_to_raw_videos = main_path / "Fish/Data"
@@ -43,7 +56,7 @@ class VideoHandler:
         self.path_to_video = path_to_raw_videos / self.event_name / self.day / f"DJI_{self.number}.MOV"
         self.path_to_save = path_to_corrected_videos / self.event_name / self.day / f"DJI_{self.number}_{self.version}"
 
-        # Configure contour directory for stabilization (Using Gaspard's Code)
+        # Configure contour directory for stabilization (Gaspard's Contours)
         contour_dir_name = f"{self.year[2:]}_{self.month}_{self.day}_{self.number}"
         if self.version:
             contour_dir_name += f"_{self.version}"
@@ -77,8 +90,11 @@ class VideoHandler:
         np.save(filename, data)
         print_success(f"Data saved to {filename}")
 
- 
-from typing import Union
+    def get_srt_info(self):
+        """Get subtitle information from the SRT file."""
+        parser = ParserSRT(self.path_to_video.with_suffix('.SRT'))
+        return parser.data
+        
 
 def check_params_format(year: Union[int, float], month: str, day: Union[int, float, str], number: Union[int, float, str], version: Union[int, float, str], N: int):
     try:
@@ -129,3 +145,70 @@ def check_params_format(year: Union[int, float], month: str, day: Union[int, flo
         "version": str(version),
         "N": str(N)
     }
+
+
+class ParserSRT:
+    """
+    Just a class to parse the srt files to get a pandas dataframe with every info for each frame
+    """
+    def __init__(self, path_to_srt):
+        """
+        Given the path to a srt file get the data
+        """
+        self.subs = pysrt.open(path_to_srt)
+        self.data = self.parse()
+
+    def parse(self):
+        columns = ["frame_count", "diff_time", "timestamp", "iso", "shutter", 
+                   "fnum", "ev", "ct", "color_md", "focal_len", 
+                   "latitude", "longitude", "rel_alt", "abs_alt"]
+        data = []
+
+        for sub in self.subs:
+            text = sub.text.replace('<font size="28">', '').replace('</font>', '').strip()
+            lines = text.split('\n')
+            if len(lines) < 3:
+                continue
+            frame_info = lines[0]
+            timestamp = lines[1].strip()
+            metadata = lines[2:]
+
+            try:
+                frame_count = int(re.search(r'FrameCnt:\s*(\d+)', frame_info).group(1))
+                diff_time = re.search(r'DiffTime:\s*([\d.]+ms)', frame_info).group(1)
+
+                timestamp = datetime.datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S.%f')
+                
+                values = {
+                    "frame_count": frame_count,
+                    "diff_time": diff_time,
+                    "timestamp": timestamp
+                }
+
+                matches = re.findall(r'\[([^\]]+)\]', " ".join(metadata))
+                for match in matches:
+                    if "rel_alt" in match and "abs_alt" in match:
+                        alt_match = re.match(r'rel_alt:\s*([-.\d]+)\s+abs_alt:\s*([-.\d]+)', match)
+                        if alt_match:
+                            values["rel_alt"] = float(alt_match.group(1))
+                            values["abs_alt"] = float(alt_match.group(2))
+                    else:
+                        key_val = match.split(":")
+                        if len(key_val) == 2:
+                            key = key_val[0].strip()
+                            val = key_val[1].strip()
+                            try:
+                                val = float(val)
+                            except ValueError:
+                                pass
+                            values[key] = val
+
+                data.append(values)
+            except Exception as e:
+                print(f"Error parsing subtitle: {e}")
+
+        df = pd.DataFrame(data, columns=columns)
+        return df
+
+    def __item__(self, idx):
+        return self.data.iloc[idx]

@@ -144,14 +144,11 @@ class ContoursPipeline:
             contour = np.array(contour, dtype=np.int32)
             contour = contour.reshape((-1, 1, 2))
             
-    
-        
             # Draw cartesian contour
             cv2.polylines(frame, [contour], isClosed=True, color=(28, 29, 23), thickness=12)
             
             # Draw raw contour
             cv2.polylines(frame, [raw_contour], isClosed=True, color=(244, 233, 239), thickness=6)
-
 
             # Add frame number
             cv2.putText(frame, f"Frame: {index}", (200, 250), cv2.FONT_HERSHEY_COMPLEX, 3, (0, 0, 0), 3)
@@ -163,15 +160,12 @@ class ContoursPipeline:
             cv2.putText(frame, "Cartesian", (width-700, height-100), cv2.FONT_HERSHEY_COMPLEX, 1.5, (28, 29, 23), 3)
             cv2.line(frame, (width-400, height-100), (width-200, height-100), (28, 29, 23), 5)
             
-
             out.write(frame)
             
         out.release()
         cap.release()
         print_success("Video created from contours.")
         print_success("Video saved to:" + str(output_path))
-
-
 
 def plot_area(areas, save_path=None):
     import matplotlib.pyplot as plt
@@ -184,61 +178,3 @@ def plot_area(areas, save_path=None):
     plt.xlabel('Frame number')
     plt.ylabel('Normalized Area')
     plt.savefig(save_path, dpi=400)
-
-
-
-
-
-
-
-    # def process_video(self, num_frames=None):
-        
-    #     print_title("Processing video with YOLOv?", title="")
-
-    #     # TEMPORARY: SAVE THE AREA OF THE FLOCK FOR DEVELOPMENT PURPOSES
-    #     areas = []
-
-    #     device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
-    #     results = self.model(self.video_path, stream=True, verbose=False, save=False, device=device, imgsz=1024, retina_masks=True)
-
-    #     cap = cv2.VideoCapture(self.video_path)
-    #     width, height, fps, total_frames = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), cap.get(cv2.CAP_PROP_FPS), int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    #     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    #     out = cv2.VideoWriter(self.videos_dir / "original_yolo.MOV", fourcc, fps, (width, height))
-
-    #     if num_frames is None:
-    #         num_frames = total_frames
-    
-    #     for index, result in track(enumerate(results), total=num_frames, description="Processing frames"):
-    #         if index >= num_frames:
-    #             break
-    #         if result.masks is not None and len(result.masks.xy) > 0:
-    #             mask = result.masks.xy[0]
-    #             np.save(self.contours_dir / f"frame_{index:06d}.npy", mask)
-
-    #             # Calculate the area of the mask
-    #             polygon = Polygon(mask)
-    #             area = polygon.area
-    #             areas.append(area)
-
-    #         ret, frame = cap.read()
-    #         if not ret:
-    #             print_info("No more frames to read.")
-    #             break
-    #         contour = np.array(mask, dtype=np.int32)
-    #         contour = contour.reshape((-1, 1, 2))  # Format for cv2.polylines
-    #         # add a text to indicate the frame number
-    #         cv2.putText(frame, f"Frame: {index}", (200, 250), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 0), 3)
-    #         cv2.polylines(frame, [contour], isClosed=True, color=(0, 0, 0), thickness=10)
-    #         out.write(frame)
-
-    #     out.release()
-    #     cap.release()
-
-
-    #     plot_area(areas, save_path=self.main_dir / "areas_raw.png")
-    #     np.save(self.main_dir / "areas.npy", areas)
-        
-    #     print_success("Done processing video.")
-    #     print_success("Video saved to:" + str(self.videos_dir) + "/main_video.MOV")
-    #     print_success("Contours saved to:" + str(self.contours_dir))
