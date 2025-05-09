@@ -174,10 +174,9 @@ class ContoursPipeline:
 
             cv2.putText(frame, "Cartesian", (width-700, height-100), cv2.FONT_HERSHEY_COMPLEX, 1.5, (28, 29, 23), 3)
             cv2.line(frame, (width-400, height-100), (width-200, height-100), (28, 29, 23), 5)
-            
-
+        
             out.write(frame)
-            
+
         out.release()
         cap.release()
         print_success("Video created from contours.")

@@ -10,8 +10,15 @@ from .printing import *
 from .utils import *
 
 
-def compute_background(path_to_video, path_to_save, num_images):
-    cap = cv2.VideoCapture(path_to_video)
+def compute_background(handler, num_images=30):
+    if os.path.exists(handler.path_to_save / "background.png"):
+        print_info("Background already exists. Skipping computation.")
+        return False
+    # Use the stabilized video to compute the background
+    cap = cv2.VideoCapture(handler.path_to_save / f"Stabilized_{handler.N}.MOV")
+    if not cap.isOpened():
+        print_error("Error: Could not open video.")
+        return False
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     index_list = np.linspace(0, total_frames - 1, num_images, dtype=int)
@@ -30,83 +37,54 @@ def compute_background(path_to_video, path_to_save, num_images):
     frames = np.array(frames)
     background_max = np.max(frames, axis=0).astype(np.uint8)
 
-    background_path = os.path.join(path_to_save, "background.png")
+    background_path = handler.path_to_save / "background.png"
     cv2.imwrite(background_path, cv2.cvtColor(background_max, cv2.COLOR_RGB2BGR))
 
     print_success(f"Background computed and saved to {background_path}")
     return background_max
 
 
-def compute_background2(path_to_video, path_to_save, num_images=20):
-    path_to_bg_frames = os.path.join(path_to_save, "frames_for_background")
-
-    if os.path.exists(path_to_bg_frames):
-        shutil.rmtree(path_to_bg_frames)
-    os.makedirs(path_to_bg_frames)
-
-    video_to_images(path_to_video, path_to_bg_frames, num_frames_to_extract=num_images, name="frame_")
-
-    frame_files = sorted(os.listdir(path_to_bg_frames))
-    frames = []
-
-    for frame_file in frame_files:
-        frame_path = os.path.join(path_to_bg_frames, frame_file)
-        frame = cv2.imread(frame_path)
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frames.append(frame_rgb)
-
-    frames_array = np.array(frames)
-
-    background_max = np.max(frames_array, axis=0).astype(np.uint8)
-    background_path = os.path.join(path_to_save, "background.png")
-    cv2.imwrite(background_path, cv2.cvtColor(background_max, cv2.COLOR_RGB2BGR))
-
-    print_success(f"Background computed and saved to {background_path}")
-    return background_max
-
-
-def remove_background_frame(path_to_video, background, frame_index, path_to_save):
-    cap = cv2.VideoCapture(path_to_video)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-    ret, frame = cap.read()
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    cap.release()
-
-    if not ret:
-        print_error(f"Error reading frame {frame_index}")
+def remove_background(handler):
+    background = cv2.imread(handler.path_to_save / "background.png")
+    if background is None:
+        print_error("Error: Background image not found.")
+        return False
+    if os.path.exists(handler.path_to_save / f"Backgrounded_{handler.N}.MOV"):
+        print_info("Backgrounded video already exists. Skipping computation.")
         return False
 
-    diff = frame.astype(np.int16) - background.astype(np.int16)
-    diff = np.abs(diff).astype(np.uint8)
+    background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
 
-    diff_filename = os.path.join(path_to_save, f"frame_{frame_index:06d}.png")
-    cv2.imwrite(diff_filename, cv2.cvtColor(diff, cv2.COLOR_RGB2BGR))  # No color conversion
-    return True
-
-
-def remove_background(path_to_video, path_to_save):
-    background = compute_background(path_to_video, path_to_save)
-
-    cap = cv2.VideoCapture(path_to_video)
+    # Open the video (Stabilized) to remove the background
+    cap = cv2.VideoCapture(handler.path_to_save / f"Stabilized_{handler.N}.MOV")
     if not cap.isOpened():
         print_error("Error: Could not open video.")
         return False
-
     num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    (width, height) = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+
+    # Prepare the video writer to save the output video
+    writer = cv2.VideoWriter(handler.path_to_save / f"Backgrounded_{handler.N}.MOV",
+                             cv2.VideoWriter_fourcc(*'avc1'), 
+                             fps,
+                             (width, height))
+
+    for i in track(range(num_frames), description="Removing background"):
+        ret, frame = cap.read()
+        if not ret:
+            print_error(f"Error reading frame {i}")
+            break
+        # Convert the frame to RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        diff = frame.astype(np.int16) - background.astype(np.int16)
+        diff = np.abs(diff).astype(np.uint8)
+
+        # Write the frame to the output video
+        writer.write(cv2.cvtColor(diff, cv2.COLOR_RGB2BGR))
+    
     cap.release()
+    writer.release()
 
-    path_to_save_frames = os.path.join(path_to_save, "frames_no_background")
-    os.makedirs(path_to_save_frames, exist_ok=True)
-
-    Parallel(n_jobs=100)(
-        delayed(remove_background_frame)(path_to_video, background, i, path_to_save_frames)
-        for i in track(range(num_frames), description="Removing background", total=num_frames)
-    )
-
-    print_success(f"Background removed from {num_frames} frames and saved to {path_to_save_frames}")
-
-    # Compute a video from the frames
-    video_name = path_to_save_frames.split("/")[-1]
-    video_output_path = os.path.join(path_to_save, f"{video_name}_no_background.MOV")
-    images_to_video(path_to_save_frames, video_output_path, fps=60)
+    print_success(f"Background removed and saved to {handler.path_to_save / f'Backgrounded_{handler.N}.MOV'}")
     return True
