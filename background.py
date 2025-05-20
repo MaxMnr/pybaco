@@ -1,9 +1,6 @@
-import os
 import cv2
 import multiprocessing as mp
-import time
 import numpy as np
-import shutil  
 from rich.progress import Progress, track
 from joblib import Parallel, delayed
 from .printing import *
@@ -11,9 +8,6 @@ from .utils import *
 
 
 def compute_background(handler, num_images=30):
-    if os.path.exists(handler.path_to_save / "background.png"):
-        print_info("Background already exists. Skipping computation.")
-        return False
     # Use the stabilized video to compute the background
     cap = cv2.VideoCapture(handler.path_to_save / f"Stabilized_{handler.N}.MOV")
     if not cap.isOpened():
@@ -21,7 +15,7 @@ def compute_background(handler, num_images=30):
         return False
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    index_list = np.linspace(0, total_frames - 1, num_images, dtype=int)
+    index_list = np.linspace(total_frames * 0.1, total_frames*0.9, num_images, dtype=int)
 
     frames = []
 
@@ -35,7 +29,7 @@ def compute_background(handler, num_images=30):
     cap.release()
 
     frames = np.array(frames)
-    background_max = np.max(frames, axis=0).astype(np.uint8)
+    background_max = 0
 
     background_path = handler.path_to_save / "background.png"
     cv2.imwrite(background_path, cv2.cvtColor(background_max, cv2.COLOR_RGB2BGR))
@@ -49,9 +43,6 @@ def remove_background(handler):
     if background is None:
         print_error("Error: Background image not found.")
         return False
-    if os.path.exists(handler.path_to_save / f"Backgrounded_{handler.N}.MOV"):
-        print_info("Backgrounded video already exists. Skipping computation.")
-        return False
 
     background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
 
@@ -60,6 +51,8 @@ def remove_background(handler):
     if not cap.isOpened():
         print_error("Error: Could not open video.")
         return False
+    else:
+        print_success("Video opened successfully")
     num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     (width, height) = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
@@ -69,7 +62,7 @@ def remove_background(handler):
                              cv2.VideoWriter_fourcc(*'avc1'), 
                              fps,
                              (width, height))
-
+    ret, frame = cap.read()
     for i in track(range(num_frames), description="Removing background"):
         ret, frame = cap.read()
         if not ret:
