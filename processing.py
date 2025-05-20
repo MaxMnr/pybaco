@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 from shapely.geometry import Polygon
 import multiprocessing as mp
+from ultralytics import YOLO
 
 from typing import Optional, List
 import logging
@@ -42,20 +43,11 @@ class ProcessingPipeline:
         self.do_averaging = bool(do_averaging)
         self.do_stabilization = bool(do_stabilization)
 
-
         # Paths setup
         self.averaging_path = self.handler.path_to_save / f"Averaged_{self.num_frames_to_average}"
         self.transformations_path = self.handler.path_to_save / f"Transformation_Matrices_{self.num_frames_to_average}"
         self.stabilizing_path = self.handler.path_to_save / f"Stabilized_{self.num_frames_to_average}"
-        
-        # Remove folders if they already exist
-        # if self.averaging_path.exists():
-        #     shutil.rmtree(self.averaging_path)
-        # if self.transformations_path.exists():
-        #     shutil.rmtree(self.transformations_path)
-        # if self.stabilizing_path.exists():
-        #     shutil.rmtree(self.stabilizing_path)
-        
+
         if self.handler.path_to_save.exists():
             shutil.rmtree(self.handler.path_to_save)
 
@@ -64,11 +56,52 @@ class ProcessingPipeline:
                      self.transformations_path, self.stabilizing_path]:
             path.mkdir(parents=True, exist_ok=True)
         
+        if self.do_stabilization:
+            if not self.handler.path_to_contour.exists():
+                self._find_contours(path_to_model="yolo_models/banc_best.pt")
+        
         # Transformation data
         self.frame_to_frame_transforms = None
         self.smoothed_transforms = None
 
+    def _find_contours(self, path_to_model):
+        """
+        Find contours in the video using YOLO and save them to the specified directory.
+        """
+        # Load YOLO model
+        model = YOLO(path_to_model)
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(self.handler.path_to_contour, exist_ok=True)
+        
+        # Open video file
+        cap = cv2.VideoCapture(str(self.handler.path_to_video))
+        
+        if not cap.isOpened():
+            logger.error(f"Error opening video file: {self.handler.path_to_video}")
+            return False
+        
+        # Process each frame
+        for frame_index in range(self.first_frame_index, self.first_frame_index + self.total_frames):
+            # Only process frames that are multiples of 10
+            if (frame_index - self.first_frame_index) % 60 == 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ret, frame = cap.read()
+                if not ret:
+                    logger.error(f"Error reading frame {frame_index} from video")
+                    break
+                
+                # Run YOLO model on the frame
+                results = model(frame)
+                
+                # Keep only the first contour
 
+                        
+
+
+            np.save(contour_file, np.array(polygon.exterior.coords))
+        
+        cap.release()
         
 
     def run(self):
@@ -76,6 +109,11 @@ class ProcessingPipeline:
         logger.info(f"Starting processing: {self.handler.event_name} {self.handler.day} {self.handler.number} {self.handler.version}")
         print_title(f"Starting processing: {self.handler.event_name} {self.handler.day} DJI_{self.handler.number} {self.handler.version}", title="")
         print_info(f"Gonna process {self.total_frames} frames\n")
+
+        # If stabilization is needed, check if the contour directory exists otherwise, find the contours using yolo
+        if self.do_stabilization:
+
+
 
         # STEP 1: Process frames (average and compute transformations)
         success = self.run_phase_one()

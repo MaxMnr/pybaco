@@ -13,25 +13,29 @@ from typing import Union
 class VideoHandler:
     """Handles video paths (video IO and metadata) for drone recordings."""
 
-    def __init__(self, year: Union[int, float], month: str, day: Union[int, float], number: Union[int, float], version: Union[int, float], N: int, config: bool = True):
+    def __init__(self, year: Union[int, float], month: str, day: Union[int, float], number: Union[int, float], version: Union[int, float], N: int, config: bool = True, main_path: str = "/Maxime/Corrected"):
         """
-        year: int or float - 20XX
+        Carefull params must be strictly in the format:
+        year: int - 20XX
         month: str - ["February", "March", "November", "December"]
-        day: int or float - Day number of a given campaign
-        number: int or float - Number of the video (DJI_XXXX)
-        version: int or float - Sub Index for a video sequence
-        N: int or float - Number of frames used to average while removing the ripples
+        day: int - [1, 2, 3, ...]
+        number: int - [from 0 to 9999]
+        version: int - [0, 1, 2, ...]
+        N: int - Number of frames used to average while removing the ripples
         """
-        # Convert all parameters to expected format and to strings 
-        verified_params = check_params_format(year, month, day, number, version, N)
-        self.year = verified_params["year"]
-        self.month = verified_params["month"]
-        self.day = verified_params["day"]
-        self.number = verified_params["number"]
-        self.version = verified_params["version"]
-        self.N = verified_params["N"]
+        self.year = year
+        self.month = month
+        self.day = f"Day{int(float(day))}"
+        self.number = str(int(float(number))).zfill(4)
+        self.version = str(int(float(version)))
+        self.N = int(float(N))
+
+
 
         self.event_name = Path(f"Abaco_{self.month}_{self.year}")
+        self.path_to_raw_videos = Path("Fish/Data")
+        self.path_to_corrected_videos = Path(main_path)
+
         if config:
             self._configure_paths()
 
@@ -46,10 +50,10 @@ class VideoHandler:
             main_path = Path("/partages/Bartololab3/Shared/")
         else:
             raise EnvironmentError("Unsupported operating system. This code is designed for MacOS or Linux. If you are using Windows it's still time to upgrade ;)")
-
+        
         """Configure file paths based on parameters."""
-        path_to_raw_videos = main_path / "Fish/Data"
-        path_to_corrected_videos = main_path / "Maxime/Corrected"
+        path_to_raw_videos = main_path / self.path_to_raw_videos
+        path_to_corrected_videos = main_path / self.path_to_corrected_videos
         path_to_bad_contours = main_path / "Maxime/Polygons_Contours"
     
         # Configure video path and output directory
@@ -57,7 +61,7 @@ class VideoHandler:
         self.path_to_save = path_to_corrected_videos / self.event_name / self.day / f"DJI_{self.number}_{self.version}"
 
         # Configure contour directory for stabilization (Gaspard's Contours)
-        contour_dir_name = f"{self.year[2:]}_{self.month}_{self.day}_{self.number}"
+        contour_dir_name = f"{str(self.year)[2:]}_{self.month}_{self.day}_{self.number}"
         if self.version:
             contour_dir_name += f"_{self.version}"
         self.path_to_contour = path_to_bad_contours / contour_dir_name / "Cartesian"
@@ -65,6 +69,14 @@ class VideoHandler:
         # Check if the contour directory exists
         if not self.path_to_contour.exists():
             print_error(f"Contour directory does not exist: {self.path_to_contour}")
+            # Create the output directory if it doesn't exist
+            self.path_to_contour.mkdir(parents=True, exist_ok=True)
+
+
+
+
+
+
 
     def get_video_info(self) -> Dict[str, Any]:
         """Get video information like frame count, fps, width, and height."""
@@ -95,57 +107,6 @@ class VideoHandler:
         parser = ParserSRT(self.path_to_video.with_suffix('.SRT'))
         return parser.data
         
-
-def check_params_format(year: Union[int, float], month: str, day: Union[int, float, str], number: Union[int, float, str], version: Union[int, float, str], N: int):
-    try:
-        year = int(float(year))
-        if not 2000 <= year <= 2100:
-            raise ValueError
-    except:
-        raise ValueError(f"Year must be convertible to int between 2000 and 2100, got {year}")
-
-    if not isinstance(month, str) or month not in {"February", "March", "November", "December"}:
-        raise ValueError(f"Month must be one of ['February', 'March', 'November', 'December'], got {month}")
-
-    try:
-        d = str(day).strip()
-        if d.lower().startswith("day"):
-            d = d[3:]
-        day = f"Day{int(float(d))}"
-    except:
-        raise ValueError(f"Day must be convertible to format 'DayX', got {day}")
-
-    try:
-        number = str(int(float(number))).zfill(4)
-        if len(number) != 4:
-            raise ValueError
-    except:
-        raise ValueError(f"Number must be convertible to 4-digit string, got {number}")
-
-    try:
-        version = str(int(float(version)))
-        if len(version) != 1:
-            raise ValueError
-    except:
-        raise ValueError(f"Version must be convertible to 1-digit string, got {version}")
-
-    try: 
-        N = int(float(N))
-        if N < 1:
-            raise ValueError
-    except:
-        raise ValueError(f"N must be convertible to int greater than 0, got {N}")
-
-    # Returns a dictionary with the verified parameters
-    return {
-        "year": str(year),
-        "month": str(month),
-        "day": str(day),
-        "number": str(number),
-        "version": str(version),
-        "N": str(N)
-    }
-
 
 class ParserSRT:
     """
