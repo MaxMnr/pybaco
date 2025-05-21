@@ -87,7 +87,7 @@ class ContoursPipelineCBP:
 
         print_title("Processing video with YOLOv11", title=f"Running with {device}")
 
-        cap = cv2.VideoCapture(str(self.video_path))  # Ensure correct path type
+        cap = cv2.VideoCapture(str(self.video_path))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         if num_frames is None or num_frames > total_frames:

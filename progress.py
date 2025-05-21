@@ -2,7 +2,7 @@ import time
 from typing import Dict
 import multiprocessing as mp
 import threading
-from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn
 
 class ProgressTracker:
     """
@@ -35,9 +35,10 @@ class ProgressTracker:
         with Progress(
             TextColumn("[bold blue]{task.description}"),
             BarColumn(bar_width=40),
-            TaskProgressColumn(),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            TimeElapsedColumn(),
             TimeRemainingColumn(),
-            TextColumn("[bold green]Step {task.completed} of {task.total}")  # Add custom step display
+            TextColumn("[bold green]Step {task.completed} of {task.total}")
         ) as progress:
             # Create tasks for each item
             for task_name, total in self.tasks.items():

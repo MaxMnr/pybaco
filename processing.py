@@ -16,6 +16,7 @@ from .stabilization import *
 from .utils import *
 from .printing import *
 from .progress import ProgressTracker
+from rich.progress import track
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -25,12 +26,13 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-
 class ProcessingPipeline:
     """
     A pipeline for processing video frames with averaging and stabilization using workers and queues.
     """
-    def __init__(self, handler: VideoHandler, first_frame_index: int = 0, total_frames: Optional[int] = 60, num_frames_to_average: int = 21, num_workers: int = 10, do_averaging: bool = True, do_stabilization: bool = True):
+    def __init__(self, handler: VideoHandler, first_frame_index: int = 0, total_frames: Optional[int] = 60, 
+                 num_frames_to_average: int = 21, num_workers: int = 10, num_transform_workers: int = None,
+                 do_averaging: bool = True, do_stabilization: bool = True):
         self.handler = handler
         
         # Video parameters
@@ -40,10 +42,13 @@ class ProcessingPipeline:
         # Processing options
         self.num_frames_to_average = int(num_frames_to_average) if do_averaging else 1 
         self.num_workers = int(num_workers)
+        # Set num_transform_workers to 2*num_workers if not specified
+        self.num_transform_workers = int(num_transform_workers) if num_transform_workers is not None else int(num_workers) * 2
         self.do_averaging = bool(do_averaging)
         self.do_stabilization = bool(do_stabilization)
 
         # Paths setup
+        self.path_to_bad_contour = self.handler.path_to_save / "bad_contours"
         self.averaging_path = self.handler.path_to_save / f"Averaged_{self.num_frames_to_average}"
         self.transformations_path = self.handler.path_to_save / f"Transformation_Matrices_{self.num_frames_to_average}"
         self.stabilizing_path = self.handler.path_to_save / f"Stabilized_{self.num_frames_to_average}"
@@ -52,13 +57,8 @@ class ProcessingPipeline:
             shutil.rmtree(self.handler.path_to_save)
 
         # Create directories
-        for path in [self.handler.path_to_save, self.averaging_path, 
-                     self.transformations_path, self.stabilizing_path]:
+        for path in [self.handler.path_to_save, self.averaging_path, self.transformations_path, self.stabilizing_path, self.path_to_bad_contour]:
             path.mkdir(parents=True, exist_ok=True)
-        
-        if self.do_stabilization:
-            if not self.handler.path_to_contour.exists():
-                self._find_contours(path_to_model="yolo_models/banc_best.pt")
         
         # Transformation data
         self.frame_to_frame_transforms = None
@@ -69,11 +69,10 @@ class ProcessingPipeline:
         Find contours in the video using YOLO and save them to the specified directory.
         """
         # Load YOLO model
-        model = YOLO(path_to_model)
+        model = YOLO(path_to_model, verbose=False)
         
         # Create output directory if it doesn't exist
-        os.makedirs(self.handler.path_to_contour, exist_ok=True)
-        
+        os.makedirs(self.path_to_bad_contour, exist_ok=True)
         # Open video file
         cap = cv2.VideoCapture(str(self.handler.path_to_video))
         
@@ -82,8 +81,8 @@ class ProcessingPipeline:
             return False
         
         # Process each frame
-        for frame_index in range(self.first_frame_index, self.first_frame_index + self.total_frames):
-            # Only process frames that are multiples of 10
+        for frame_index in track(range(self.first_frame_index, self.first_frame_index + self.total_frames), description="Finding Bad Contours"):
+            # Only process one frame every second
             if (frame_index - self.first_frame_index) % 60 == 0:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
                 ret, frame = cap.read()
@@ -92,16 +91,15 @@ class ProcessingPipeline:
                     break
                 
                 # Run YOLO model on the frame
-                results = model(frame)
-                
-                # Keep only the first contour
+                results = model(frame, imgsz=640, retina_masks=True, verbose=False)
+                result = results[0]
+                if result.masks is not None and len(result.masks.xy) > 0:
+                    mask = result.masks.xy[0]                        
 
-                        
-
-
-            np.save(contour_file, np.array(polygon.exterior.coords))
+            np.save(self.path_to_bad_contour / f"frame_{frame_index:06d}.npy", mask)
         
         cap.release()
+        print_success(f"Contours saved to {self.path_to_bad_contour}")
         
 
     def run(self):
@@ -109,12 +107,12 @@ class ProcessingPipeline:
         logger.info(f"Starting processing: {self.handler.event_name} {self.handler.day} {self.handler.number} {self.handler.version}")
         print_title(f"Starting processing: {self.handler.event_name} {self.handler.day} DJI_{self.handler.number} {self.handler.version}", title="")
         print_info(f"Gonna process {self.total_frames} frames\n")
-
-        # If stabilization is needed, check if the contour directory exists otherwise, find the contours using yolo
+        
+        # STEP 0: Create bad contours for stabilization 
         if self.do_stabilization:
-
-
-
+            print_info(f"Creating contours in {self.handler.path_to_save / "bad_contours"}")
+            self._find_contours(path_to_model="../yolo_models/banc_best.pt")
+        
         # STEP 1: Process frames (average and compute transformations)
         success = self.run_phase_one()
         if not success:
@@ -173,12 +171,12 @@ class ProcessingPipeline:
             
             if self.do_stabilization:
                 # Check wether all contours from frame_indices exist
-                contours = sorted([f for f in os.listdir(self.handler.path_to_contour) if f.endswith(".npy")])
+                contours = sorted([f for f in os.listdir(self.path_to_bad_contour) if f.endswith(".npy")])
 
                 for index in frame_indices:
                     expected_file = f"frame_{index:06d}.npy"
                     if expected_file not in contours:
-                        logger.error(f"File {expected_file} not found in the folder {self.handler.path_to_contour}")
+                        logger.error(f"File {expected_file} not found in the folder {self.path_to_bad_contour}")
                         return False
                 
             # Set up progress tracking
@@ -206,7 +204,7 @@ class ProcessingPipeline:
             ref_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             cap.release()
 
-            # Calculate chunks for frame averaging workers
+            # Calculate chunks for frame averaging workers based on num_workers
             chunk_size = max(1, len(frame_indices) // self.num_workers)
             
             # Start the progress tracker
@@ -215,7 +213,7 @@ class ProcessingPipeline:
             # Start workers
             workers = self._start_phase_one_workers(
                 frame_indices, chunk_size, self.handler.path_to_video, self.averaging_path,
-                self.transformations_path, self.handler.path_to_contour, frame_queue,
+                self.transformations_path, self.path_to_bad_contour, frame_queue,
                 progress, ref_img
             )
             
@@ -237,7 +235,7 @@ class ProcessingPipeline:
         """Start the workers for phase one and return the list of worker processes."""
         workers = []
         
-        # Start averaging workers
+        # Start averaging workers based on self.num_workers
         for i in range(self.num_workers):
             start_idx = i * chunk_size
             end_idx = start_idx + chunk_size if i < self.num_workers - 1 else len(frame_indices)
@@ -258,9 +256,9 @@ class ProcessingPipeline:
             workers.append(worker)
             worker.start()
         
-        # Start transformation workers if needed
+        # Start transformation workers if needed - using self.num_transform_workers
         if self.do_stabilization:
-            for _ in range(self.num_workers):
+            for _ in range(self.num_transform_workers):
                 worker = mp.Process(
                     target=self._transformation_worker,
                     args=(
@@ -273,9 +271,11 @@ class ProcessingPipeline:
                 )
                 workers.append(worker)
                 worker.start()
+        if self.do_stabilization and self.num_transform_workers > self.num_workers:
+            for _ in range(self.num_transform_workers - self.num_workers):
+                frame_queue.put(None)
         
         return workers
-    
     def run_phase_two(self):
         """
         Run the second phase: Apply stabilization to averaged frames.
@@ -382,6 +382,7 @@ class ProcessingPipeline:
                 if worker.is_alive():
                     worker.terminate()
             return False
+
     
     @staticmethod # Using static method to ensure pickability for multiprocess stuff 
     def _frame_averaging_worker(

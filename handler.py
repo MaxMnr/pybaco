@@ -13,7 +13,7 @@ from typing import Union
 class VideoHandler:
     """Handles video paths (video IO and metadata) for drone recordings."""
 
-    def __init__(self, year: Union[int, float], month: str, day: Union[int, float], number: Union[int, float], version: Union[int, float], N: int, config: bool = True, main_path: str = "/Maxime/Corrected"):
+    def __init__(self, year: Union[int, float], month: str, day: Union[int, float], number: Union[int, float], version: Union[int, float], N: int, config: bool = True):
         """
         Carefull params must be strictly in the format:
         year: int - 20XX
@@ -34,7 +34,7 @@ class VideoHandler:
 
         self.event_name = Path(f"Abaco_{self.month}_{self.year}")
         self.path_to_raw_videos = Path("Fish/Data")
-        self.path_to_corrected_videos = Path(main_path)
+        self.path_to_corrected_videos = Path("Maxime/Corrected")
 
         if config:
             self._configure_paths()
@@ -54,28 +54,23 @@ class VideoHandler:
         """Configure file paths based on parameters."""
         path_to_raw_videos = main_path / self.path_to_raw_videos
         path_to_corrected_videos = main_path / self.path_to_corrected_videos
-        path_to_bad_contours = main_path / "Maxime/Polygons_Contours"
-    
+ 
         # Configure video path and output directory
         self.path_to_video = path_to_raw_videos / self.event_name / self.day / f"DJI_{self.number}.MOV"
         self.path_to_save = path_to_corrected_videos / self.event_name / self.day / f"DJI_{self.number}_{self.version}"
 
-        # Configure contour directory for stabilization (Gaspard's Contours)
-        contour_dir_name = f"{str(self.year)[2:]}_{self.month}_{self.day}_{self.number}"
-        if self.version:
-            contour_dir_name += f"_{self.version}"
-        self.path_to_contour = path_to_bad_contours / contour_dir_name / "Cartesian"
+    def get_contours(self) -> np.ndarray:
+        contours = np.load(self.path_to_save / f"raw_contours.npy", allow_pickle=True)
+        if contours is None:
+            raise FileNotFoundError(f"Contours file not found: {self.path_to_save / f'raw_contours.npy'}")
+        return contours
 
-        # Check if the contour directory exists
-        if not self.path_to_contour.exists():
-            print_error(f"Contour directory does not exist: {self.path_to_contour}")
-            # Create the output directory if it doesn't exist
-            self.path_to_contour.mkdir(parents=True, exist_ok=True)
-
-
-
-
-
+    def get_GSD(self) -> float:
+        gsd = np.load(self.path_to_save / "GSD" / f"gsd_mean.npy", allow_pickle=True)
+        if gsd is None:
+            raise FileNotFoundError(f"GSD file not found: {self.path_to_save / 'GSD' / 'GSD_mean.npy'}")
+        return gsd
+    
 
 
     def get_video_info(self) -> Dict[str, Any]:
