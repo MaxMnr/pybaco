@@ -2,6 +2,8 @@ import subprocess
 from pathlib import Path
 from typing import Union, List
 import re
+import numpy as np
+from shapely.geometry import Point
 from .printing import *
 
 def create_folder(path: Union[str, Path], overwrite: bool = False) -> Path:
@@ -137,10 +139,29 @@ def images_to_video(
     print_info(f"Running FFmpeg: {folder_path}")
 
     try:
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print_success(f"Video created: {output_video}")
-        return True
-    except subprocess.CalledProcessError as e:
+        process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
+
+        # Estimate total frames from the number of PNG files
+        total_frames = len(frame_files)
+
+        current_frame = 0
+        for line in process.stderr:
+            match = re.search(r"frame=\s*(\d+)", line)
+            if match:
+                new_frame = int(match.group(1))
+                if new_frame > current_frame:
+                    current_frame = new_frame
+                    print(f"Encoding frame {current_frame}/{total_frames}", end="\r")
+        process.wait()
+
+        if process.returncode == 0:
+            print_success(f"Video created: {output_video}")
+            return True
+        else:
+            print_error("FFmpeg process failed.")
+            return False
+
+    except Exception as e:
         print_error(f"FFmpeg failed: {e}")
         return False
 
@@ -191,3 +212,11 @@ def get_os_root_dir():
         return Path("/partages/Bartololab3/Shared")
     else:
         raise EnvironmentError("Unsupported operating system. This code is designed for MacOS or Linux.")
+    
+from shapely import vectorized
+
+def polygon_to_mask(polygon, shape):
+    height, width = shape
+    y_coords, x_coords = np.mgrid[0:height, 0:width]
+    mask = vectorized.contains(polygon, x_coords + 0.5, y_coords + 0.5)
+    return mask.astype(np.uint8)

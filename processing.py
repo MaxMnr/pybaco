@@ -18,6 +18,14 @@ from .printing import *
 from .progress import ProgressTracker
 from rich.progress import track
 
+"""
+============= This class is deprecated. =============
+It is not guaranted to work fine as I continue to modify 
+other classes and functions while not maintaining this one. 
+=====================================================
+"""
+
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     filename='/partages/Bartololab3/Shared/Maxime/video_correction.log',    
@@ -111,8 +119,8 @@ class ProcessingPipeline:
         # STEP 0: Create bad contours for stabilization 
         if self.do_stabilization:
             print_info(f"Creating contours in {self.handler.path_to_save / "bad_contours"}")
-            self._find_contours(path_to_model="../yolo_models/banc_best.pt")
-        
+            self._find_contours(path_to_model="./yolo_models/banc_best.pt")
+
         # STEP 1: Process frames (average and compute transformations)
         success = self.run_phase_one()
         if not success:
@@ -202,6 +210,11 @@ class ProcessingPipeline:
                 cap.release()
                 return False
             ref_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # get bad contour for the reference frame
+            contour_file = self.path_to_bad_contour / f"frame_{self.first_frame_index:06d}.npy"
+            polygon = Polygon(np.load(contour_file))
+            mask = polygon_to_mask(polygon, ref_img.shape)
+            ref_img = cv2.bitwise_and(ref_img, ref_img, mask=mask.astype(np.uint8))
             cap.release()
 
             # Calculate chunks for frame averaging workers based on num_workers
@@ -489,7 +502,7 @@ class ProcessingPipeline:
                 
                 # Calculate transformation matrix
                 avg_frame_gray = cv2.cvtColor(avg_frame, cv2.COLOR_BGR2GRAY)
-                M = get_transformation(ref_img, avg_frame_gray, polygon, grid_size=40)
+                M = get_transformation(ref_img, avg_frame_gray, polygon)
                 
                 # Save transformation matrix
                 transform_output = os.path.join(transform_path, f"frame_{frame_index:06d}.npy")
@@ -502,7 +515,7 @@ class ProcessingPipeline:
         except Exception as e:
             logger.error(f"Error in transformation worker: {e}")
             raise  # Re-raise the exception to terminate the worker
-      
+    
     @staticmethod  # Using static method to ensure pickability for multiprocess stuff 
     def _stabilize_frames_worker(
             image_paths: List[Path],

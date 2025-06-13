@@ -21,18 +21,36 @@ progress = Progress(
 
 
 class ContoursPipelineCBP:
-    def __init__(self, handler, model_path):
+    def __init__(self, handler, model_path, video_prefix="Averaged", 
+                 contours_filename=None, output_video_filename=None):
+        """
+        Initialize the contours pipeline with configurable file names.
+        
+        Args:
+            handler: Video handler object
+            model_path: Path to YOLO model
+            video_prefix: Prefix for input video (default: "Averaged")
+            contours_filename: Custom name for contours file (default: "raw_contours_for_{video_prefix}.npy")
+            output_video_filename: Custom name for output video (default: "Contours_for_{video_prefix}_{N}.MOV")
+        """
         self.handler = handler
         self.model = YOLO(model_path)
         self.local_folder_to_save = Path("temp")
         self.local_folder_to_save.mkdir(parents=True, exist_ok=True)
+        
+        # Configurable file names
+        self.video_prefix = video_prefix
+        self.input_video_name = f"{video_prefix}_{self.handler.N}.MOV"
+        self.contours_filename = f"{contours_filename}.npy"
+        self.output_video_filename = f"{output_video_filename}_{self.handler.N}.MOV"
+        
 
     def download_video(self, username, server):
         """
-        For this method to work smoothly it may be neccesary to create a ssh key between the cbp and the server.
+        For this method to work smoothly it may be necessary to create a ssh key between the cbp and the server.
         Otherwise, the password will be prompted every time.
         """
-        path_to_video_remote = self.handler.path_to_save / f"Backgrounded_{self.handler.N}.MOV"
+        path_to_video_remote = self.handler.path_to_save / self.input_video_name
         scp_command = [
             "scp",
             f"{username}@{server}:{path_to_video_remote}",
@@ -44,7 +62,7 @@ class ContoursPipelineCBP:
             print_info(f"Downloading {path_to_video_remote} from {username}@{server}")
             subprocess.run(scp_command, check=True)
             print_success("Video downloaded")
-            self.video_path = self.local_folder_to_save / f"Backgrounded_{self.handler.N}.MOV"
+            self.video_path = self.local_folder_to_save / self.input_video_name
 
         except subprocess.CalledProcessError as e:
             print_error(f"Error downloading file: {e}")
@@ -53,36 +71,49 @@ class ContoursPipelineCBP:
         return True 
 
     def delete_files(self):
-        subprocess.run(["rm", "-rf", self.local_folder_to_save / f"Backgrounded_{self.handler.N}.MOV"], check=True)
-        print_info(f"Video deleted!")
+        """Delete all temporary files created during processing."""
+        # Delete input video
+        input_video_path = self.local_folder_to_save / self.input_video_name
+        if input_video_path.exists():
+            subprocess.run(["rm", "-rf", str(input_video_path)], check=True)
+            print_info(f"Input video {self.input_video_name} deleted!")
 
-        subprocess.run(["rm", "-rf", self.local_folder_to_save / f"Contours_{self.handler.N}.MOV"], check=True)
-        print_info(f"Final Video deleted!")
+        # Delete output video
+        output_video_path = self.local_folder_to_save / self.output_video_filename
+        if output_video_path.exists():
+            subprocess.run(["rm", "-rf", str(output_video_path)], check=True)
+            print_info(f"Output video {self.output_video_filename} deleted!")
 
-        subprocess.run(["rm", "-rf", self.local_folder_to_save / f"raw_contours.npy"], check=True)
-        print_info(f"Contours deleted!")
-
+        # Delete contours file
+        contours_path = self.local_folder_to_save / self.contours_filename
+        if contours_path.exists():
+            subprocess.run(["rm", "-rf", str(contours_path)], check=True)
+            print_info(f"Contours file {self.contours_filename} deleted!")
 
     def send_files(self, username, server):
-        # Send the two contours folders and the final video to the server
+        """Send the contours file and final video to the server."""
+        # Send contours file
         scp_command = [
             "scp",
             "-r",
-            self.local_folder_to_save / "raw_contours.npy",
+            str(self.local_folder_to_save / self.contours_filename),
             f"{username}@{server}:{self.handler.path_to_save}"
         ]
         subprocess.run(scp_command, check=True)
-        print_success("Contours sent to server")
+        print_success(f"Contours file {self.contours_filename} sent to server")
+        
+        # Send output video
         scp_command = [
             "scp",
             "-r",
-            self.local_folder_to_save / f"Contours_{self.handler.N}.MOV",
+            str(self.local_folder_to_save / self.output_video_filename),
             f"{username}@{server}:{self.handler.path_to_save}"
         ]
         subprocess.run(scp_command, check=True)
-        print_success("Final video sent to server")
+        print_success(f"Output video {self.output_video_filename} sent to server")
         
     def process_video(self, num_frames=None):
+        """Process the video to extract contours and create output video."""
         device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
         print_title("Processing video with YOLOv11", title=f"Running with {device}")
@@ -127,13 +158,14 @@ class ContoursPipelineCBP:
         print_title("Computing Smoothed Contours", title="")
 
         self.raw_contours = self._resample_contours(self.raw_contours)
-        np.save(self.local_folder_to_save / "raw_contours.npy", self.raw_contours)
+        np.save(self.local_folder_to_save / self.contours_filename, self.raw_contours)
 
         print_title("Creating video from contours", title="")
-        self.create_video_from_contours(self.local_folder_to_save / f"Contours_{self.handler.N}.MOV")
+        self.create_video_from_contours(self.local_folder_to_save / self.output_video_filename)
         print_success("Video successfully created!")
 
     def _resample_contours(self, raw_contours):
+        """Resample contours to have the same number of points."""
         max_length = max(len(c) for c in raw_contours)
         resampled_contours = []
         for contour in raw_contours:
@@ -151,10 +183,11 @@ class ContoursPipelineCBP:
         return np.stack(resampled_contours)
 
     def create_video_from_contours(self, output_path):
-        cap = cv2.VideoCapture(self.video_path)
+        """Create a video with contours overlaid on original frames."""
+        cap = cv2.VideoCapture(str(self.video_path))
         width, height, fps = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), cap.get(cv2.CAP_PROP_FPS)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
@@ -178,3 +211,6 @@ class ContoursPipelineCBP:
         print_success("Video created from contours.")
         print_success("Video saved to:" + str(output_path))
 
+    def get_remote_video_path(self):
+        """Get the full path to the remote video file."""
+        return self.handler.path_to_save / self.input_video_name

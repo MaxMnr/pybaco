@@ -3,6 +3,9 @@ import cv2
 from shapely.geometry import Polygon, Point
 from .printing import *
 
+import numpy as np
+import cv2
+
 def get_transformation(ref_img: np.ndarray, img_gray: np.ndarray, polygon: Polygon, grid_size: int = 100) -> np.ndarray:
     # Calculate optical flow
     flow = cv2.calcOpticalFlowFarneback(ref_img, img_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
